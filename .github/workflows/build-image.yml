@@ -1,0 +1,49 @@
+name: Docker 在线打包并下载
+
+# 触发条件：支持手动触发，或者在推送指定格式的 Tag 时自动触发
+on:
+  workflow_dispatch: # 允许在 GitHub 网页上手动触发
+    inputs:
+      tag_name:
+        description: '手动触发时输入的 Tag 名称 (例如: v0.43.7)'
+        required: true
+        default: 'v0.43.7'
+
+jobs:
+  build-and-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取指定 Tag 的代码（动态获取触发的 Tag）
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # 如果是手动触发，使用输入的 tag；如果是推送 tag 触发，使用当前的 ref
+          ref: ${{ github.event.inputs.tag_name || github.ref_name }}
+
+      # 2. 设置 Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 3. 在线执行 docker build 编译镜像（镜像标签也动态命名为对应的 Tag 名字）
+      - name: Build Docker Image
+        run: |
+          # 获取当前的 tag 名称（去掉潜在的 refs/tags/ 前缀）
+          TAG_VERSION="${{ github.event.inputs.tag_name || github.ref_name }}"
+          echo "Building image for tag: $TAG_VERSION"
+          docker build -t csi-s3:$TAG_VERSION .
+
+      # 4. 将编译好的镜像保存为本地的 .tar 归档文件
+      - name: Save Image to Tar
+        run: |
+          TAG_VERSION="${{ github.event.inputs.tag_name || github.ref_name }}"
+          docker save -o csi-s3-$TAG_VERSION.tar csi-s3:$TAG_VERSION
+
+      # 5. 将 .tar 文件上传到 GitHub 网页
+      - name: Upload Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # 下载包的名称会带上版本号，方便区分
+          name: docker-image-${{ github.event.inputs.tag_name || github.ref_name }}
+          path: csi-s3-*.tar
+          retention-days: 7
